@@ -14,16 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 import logging
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import six
-import requests
 
-from aws.client import _make_client
 from aws.s3.s3connection import RazS3Connection
-from aws.s3.s3test_utils import S3TestBase
 from desktop.conf import RAZ
 
 LOG = logging.getLogger()
@@ -45,7 +41,7 @@ class TestRazS3Connection():
       with patch('aws.s3.s3connection.RazS3Connection._mexe') as _mexe:
 
         get_url.return_value = {
-            'AWSAccessKeyId': 'AKIA23E77ZX2HVY76YGL',
+            'AWSAccessKeyId': 'AKIA123REDACTED',
             'Signature': '3lhK%2BwtQ9Q2u5VDIqb4MEpoY3X4%3D',
             'Expires': '1617207304'
         }
@@ -60,14 +56,14 @@ class TestRazS3Connection():
         http_request = _mexe.call_args.args[0]
 
         if isinstance(http_request, six.string_types):
-          raise SkipTest()  # Incorrect in Py3 CircleCi
+          raise SkipTest()  # Incorrect in Py3 CircleCi  # noqa: F821
 
         assert 'GET' == http_request.method
         assert 's3-us-west-1.amazonaws.com:443' == http_request.host
         assert '/' == http_request.path
         assert '/' == http_request.auth_path
         assert ({
-            'AWSAccessKeyId': 'AKIA23E77ZX2HVY76YGL',
+            'AWSAccessKeyId': 'AKIA123REDACTED',
             'Signature': '3lhK%2BwtQ9Q2u5VDIqb4MEpoY3X4%3D',
             'Expires': '1617207304'
           } ==

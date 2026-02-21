@@ -14,9 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
-import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import TestCase
@@ -41,7 +39,7 @@ class S3RazClientLiveTest(TestCase):
     assert 'Expires=' in url
 
   def test_check_acccess_s3_list_file(self):
-    # e.g. 'https://gethue-test.s3.amazonaws.com/data/query-hive-weblogs.csv?AWSAccessKeyId=AKIA23E77ZX2HVY76YGL&'
+    # e.g. 'https://gethue-test.s3.amazonaws.com/data/query-hive-weblogs.csv?AWSAccessKeyId=AKIA123REDACTED&'
     # 'Signature=3lhK%2BwtQ9Q2u5VDIqb4MEpoY3X4%3D&Expires=1617207304'
 
     url = S3RazClient().get_url(bucket='gethue-test', path='/data/query-hive-weblogs.csv')
@@ -67,15 +65,15 @@ class AdlsRazClientTest(TestCase):
     self.username = 'csso_hueuser'
 
   def test_check_rename_operation(self):
-    with patch('desktop.lib.raz.raz_client.requests.post') as requests_post:
-      with patch('desktop.lib.raz.raz_client.uuid.uuid4') as uuid:
+    with patch('desktop.lib.raz.raz_client.requests.post'):
+      with patch('desktop.lib.raz.raz_client.uuid.uuid4'):
         with patch('desktop.lib.raz.raz_client.RazClient.check_access') as check_access:
 
           reset = RAZ.API_URL.set_for_testing('https://raz_url:8000')
           check_access.return_value = {'token': 'some_random_sas_token'}
 
           try:
-            sas_token = AdlsRazClient(
+            sas_token = AdlsRazClient(  # noqa: F841
               username=self.username
             ).get_url(
               action='PUT',
