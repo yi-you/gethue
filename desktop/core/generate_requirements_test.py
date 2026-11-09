@@ -49,7 +49,7 @@ class TestRequirementsGenerator:
     os.makedirs(self.ext_py3_dir)
 
     # Create empty placeholder files that simulate local requirement packages
-    for req in ["boto-2.49.0", "django-axes-5.13.0", "django-babel", "pysaml2-7.3.1", "python-sasl-0.3.1"]:
+    for req in ["boto-2.49.0", "djangomako-1.3.2", "pyformance-0.3.2", "pysaml2-7.3.1", "python-sasl-0.3.1"]:
       with open(os.path.join(self.ext_py3_dir, req), "w") as f:
         f.write("")
 
@@ -67,18 +67,46 @@ class TestRequirementsGenerator:
 
     mock_machine.return_value = "x86_64"
     mock_version_info.major = 3
-    mock_version_info.minor = 9
+    mock_version_info.minor = 11
     mock_this_dir.return_value = self.temp_dir
 
     generator = RequirementsGenerator()
 
     assert generator.arch == "x86_64"
-    assert generator.python_version_string == "3.9"
+    assert generator.python_version_string == "3.11"
     assert isinstance(generator.requirements, list)
     assert isinstance(generator.local_requirements, list)
     assert "x86_64" in generator.arch_requirements_map
 
     assert "aarch64" in generator.arch_requirements_map
+
+  def test_certifi_is_pinned_at_or_above_emudhra_fix(self):
+    """certifi must be pinned to a release without the compromised eMudhra CA (>= 2026.10.19)."""
+    generator = RequirementsGenerator()
+
+    certifi_pins = [req for req in generator.requirements if req.lower().startswith("certifi")]
+
+    assert len(certifi_pins) == 1, certifi_pins
+    assert certifi_pins[0].startswith("certifi=="), certifi_pins
+    pinned_version = tuple(int(part) for part in certifi_pins[0].split("==")[1].split("."))
+    assert pinned_version >= (2026, 10, 19), certifi_pins
+
+  def test_base_requirements_file_mirrors_the_generator(self):
+    """
+    base_requirements.txt is only read by Dependabot, so it must list exactly the pins the build installs.
+
+    To update it after changing a pin, rewrite the file from RequirementsGenerator().requirements, the x86_64 3.11
+    extras and one `-e file://${ROOT}/desktop/core/ext-py3/<name>` line per local requirement.
+    """
+    generator = RequirementsGenerator()
+    expected_pins = set(generator.requirements) | set(generator.x86_64_requirements["3.11"])
+    expected_local = {f"-e file://${{ROOT}}/desktop/core/ext-py3/{name}" for name in generator.local_requirements}
+
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "base_requirements.txt")) as f:
+      lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    assert {line for line in lines if not line.startswith("-e ")} == expected_pins
+    assert {line for line in lines if line.startswith("-e ")} == expected_local
 
   @mock.patch("generate_requirements.this_dir", create=True)
   @mock.patch("generate_requirements.shutil.copytree")
@@ -87,11 +115,11 @@ class TestRequirementsGenerator:
 
     # Need to make this_dir return the string value directly, not a MagicMock
     mock_this_dir.__str__.return_value = self.temp_dir
-    python_version_string = "3.9"
+    python_version_string = "3.11"
 
     with mock.patch.object(RequirementsGenerator, "__init__", return_value=None):
       generator = RequirementsGenerator()
-      generator.local_requirements = ["boto-2.49.0", "django-axes-5.13.0"]
+      generator.local_requirements = ["boto-2.49.0", "pysaml2-7.3.1"]
 
       result = generator.copy_local_requirements(python_version_string)
 
@@ -99,7 +127,7 @@ class TestRequirementsGenerator:
 
       assert len(result) == 2
       assert f"file://{self.temp_dir}/{python_version_string}/boto-2.49.0" in result
-      assert f"file://{self.temp_dir}/{python_version_string}/django-axes-5.13.0" in result
+      assert f"file://{self.temp_dir}/{python_version_string}/pysaml2-7.3.1" in result
 
   @mock.patch("generate_requirements.this_dir")
   @mock.patch("builtins.open", new_callable=mock.mock_open)
@@ -112,11 +140,11 @@ class TestRequirementsGenerator:
     with mock.patch.object(RequirementsGenerator, "__init__", return_value=None):
       generator = RequirementsGenerator()
       generator.arch = "x86_64"
-      generator.python_version_string = "3.9"
+      generator.python_version_string = "3.11"
       generator.requirements = ["Django==4.1.13"]
       generator.local_requirements = []
       generator.arch_requirements_map = {
-        "x86_64": {"default": ["cryptography==42.0.8"], "3.9": ["Markdown==3.8", "numpy==1.24.4", "setuptools==80.9.0"]}
+        "x86_64": {"3.11": ["Markdown==3.8", "numpy==1.24.4", "setuptools==80.9.0"]}
       }
 
       # Mock copy_local_requirements for test isolation
@@ -125,7 +153,7 @@ class TestRequirementsGenerator:
       generator.generate_requirements()
 
       # Verify file creation with correct path
-      mock_open.assert_called_once_with(f"{self.temp_dir}/requirements-x86_64-3.9.txt", "w")
+      mock_open.assert_called_once_with(f"{self.temp_dir}/requirements-x86_64-3.11.txt", "w")
 
       # Verify correct requirements were written
       expected_requirements = "\n".join(["Django==4.1.13", "Markdown==3.8", "numpy==1.24.4", "setuptools==80.9.0"])
@@ -141,9 +169,9 @@ class TestRequirementsGenerator:
     with mock.patch.object(RequirementsGenerator, "__init__", return_value=None):
       generator = RequirementsGenerator()
       generator.arch = "unsupported_arch"
-      generator.python_version_string = "3.9"
+      generator.python_version_string = "3.11"
       generator.requirements = []
-      generator.arch_requirements_map = {"x86_64": {"default": []}, "aarch64": {"default": []}}
+      generator.arch_requirements_map = {"x86_64": {"3.11": []}, "aarch64": {"3.11": []}}
 
       with pytest.raises(ValueError) as exc_info:
         generator.generate_requirements()
@@ -160,11 +188,11 @@ class TestRequirementsGenerator:
     with mock.patch.object(RequirementsGenerator, "__init__", return_value=None):
       generator = RequirementsGenerator()
       generator.arch = "x86_64"
-      generator.python_version_string = "3.9"
+      generator.python_version_string = "3.11"
 
       result = generator.get_file_name()
 
-      assert result == f"{self.temp_dir}/requirements-x86_64-3.9.txt"
+      assert result == f"{self.temp_dir}/requirements-x86_64-3.11.txt"
 
   @mock.patch("generate_requirements.this_dir")
   @mock.patch("builtins.open", new_callable=mock.mock_open)
@@ -177,21 +205,21 @@ class TestRequirementsGenerator:
     with mock.patch.object(RequirementsGenerator, "__init__", return_value=None):
       generator = RequirementsGenerator()
       generator.arch = "x86_64"
-      generator.python_version_string = "3.9"
+      generator.python_version_string = "3.11"
       generator.requirements = []
-      generator.local_requirements = ["boto-2.49.0", "django-axes-5.13.0"]
-      generator.arch_requirements_map = {"x86_64": {"default": [], "3.9": ["Markdown==3.8", "setuptools==80.9.0"]}}
+      generator.local_requirements = ["boto-2.49.0", "pysaml2-7.3.1"]
+      generator.arch_requirements_map = {"x86_64": {"3.11": ["Markdown==3.8", "setuptools==80.9.0"]}}
 
       # Mock copy_local_requirements to return file paths
-      local_reqs = [f"file://{self.temp_dir}/3.9/boto-2.49.0", f"file://{self.temp_dir}/3.9/django-axes-5.13.0"]
+      local_reqs = [f"file://{self.temp_dir}/3.11/boto-2.49.0", f"file://{self.temp_dir}/3.11/pysaml2-7.3.1"]
       generator.copy_local_requirements = mock.MagicMock(return_value=local_reqs)
 
       generator.generate_requirements()
 
-      mock_open.assert_called_once_with(f"{self.temp_dir}/requirements-x86_64-3.9.txt", "w")
+      mock_open.assert_called_once_with(f"{self.temp_dir}/requirements-x86_64-3.11.txt", "w")
 
       expected_requirements = "\n".join(
-        ["Markdown==3.8", "setuptools==80.9.0", f"file://{self.temp_dir}/3.9/boto-2.49.0", f"file://{self.temp_dir}/3.9/django-axes-5.13.0"]
+        ["Markdown==3.8", "setuptools==80.9.0", f"file://{self.temp_dir}/3.11/boto-2.49.0", f"file://{self.temp_dir}/3.11/pysaml2-7.3.1"]
       )
 
       mock_open().write.assert_called_once_with(expected_requirements)

@@ -26,12 +26,6 @@ spec:
   - host: {{ .Values.ingress.domain }}
     http:
       paths:
-      {{- if .Values.websocket.enabled }}
-      - backend:
-          serviceName: daphne-websocket
-          servicePort: 8001
-        path: /(ws/.*)
-      {{- end }}
       - backend:
           serviceName: hue-balancer
           servicePort: 80
@@ -45,23 +39,11 @@ spec:
           servicePort: 80
         path: /
   {{- end }}
-  {{- if .Values.api.enabled }}
-  - host: {{ .Values.api.domain }}
-    http:
-      paths:
-      - backend:
-          serviceName: hue-api
-          servicePort: 8005
-        path: /(.*)
-  {{- end }}
   tls:
   - hosts:
     - {{ .Values.ingress.domain }}
     {{- range .Values.ingress.extraHosts }}
     - {{ . | quote }}
-    {{- end }}
-    {{- if .Values.api.enabled }}
-    - {{ .Values.api.domain }}
     {{- end }}
     secretName: letsencrypt-hue-prod-tls
 {{- end -}}

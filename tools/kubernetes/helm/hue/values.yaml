@@ -35,17 +35,11 @@ hue:
     celery_result_backend=redis://redis:6379/0
 balancer:
   enabled: true
-api:
-  enabled: false
-  domain: api.gethue.com
 workers:
   enabled: false
   replicas: 1
 scheduler:
   enabled: false
-websocket:
-  enabled: false
-  replicas: 1
 monitoring:
   enabled: false
 alerting:

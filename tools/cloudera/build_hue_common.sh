@@ -25,6 +25,13 @@ is_supported_os() {
   return 1
 }
 
+# Security floors for the eMudhra CA incident. Keep in sync with Makefile.vars and
+# desktop/core/pip-bootstrap-requirements.txt.
+# pip always trusts its own vendored certifi in addition to the system trust store, so any pip older than
+# 26.2.2 keeps trusting the compromised CAs.
+HUE_PIP_VERSION="26.2.2"
+HUE_VIRTUAL_ENV_VERSION="21.14.13"
+
 is_supported_python_version() {
   local PYBIN="$1"
   local version="$2"
@@ -110,7 +117,7 @@ function install_sqlite3() {
 }
 
 function install_python311() {
-  local PYTHON_VERSION=${1:-"3.11.12"}
+  local PYTHON_VERSION=${1:-"3.11.18"}
   local INSTALL_PREFIX=$2
   local LD_LIBRARY_PATH=$3
   local CPPFLAGS=$4
@@ -139,59 +146,14 @@ function install_python311() {
   #   /usr/bin/strip "${INSTALL_PREFIX}/lib/libpython3.11.so.1.0"'
 
   # Install pip
-  sudo PYTHON_VERSION=${PYTHON_VERSION} INSTALL_PREFIX=${INSTALL_PREFIX} \
+  sudo PYTHON_VERSION=${PYTHON_VERSION} INSTALL_PREFIX=${INSTALL_PREFIX} HUE_PIP_VERSION=${HUE_PIP_VERSION} \
     PYTHON_TGZ=${PYTHON_TGZ} PYTHON_SRC_DIR=${PYTHON_SRC_DIR} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
     CPPFLAGS=${CPPFLAGS} LDFLAGS=${LDFLAGS} PATH=${PATH} \
-    -- sh -c 'cd /tmp && curl -sS https://bootstrap.pypa.io/get-pip.py | "${INSTALL_PREFIX}/bin/python3.11"'
+    -- sh -c 'cd /tmp && curl -sS https://bootstrap.pypa.io/get-pip.py | "${INSTALL_PREFIX}/bin/python3.11" - "pip==${HUE_PIP_VERSION}"'
 
   export PYTHON311_PATH="${INSTALL_PREFIX}"
   export pip_bin=${PYTHON311_PATH}/bin/pip3.11
-  export VIRTUAL_ENV_VERSION="21.7.16"
-  # Pip modules install
-  sudo pip_bin=${pip_bin} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} -- sh -c '${pip_bin} install virtualenv=='${VIRTUAL_ENV_VERSION}' virtualenv-make-relocatable==0.0.1 mysqlclient==2.1.1'
-  sudo pip_bin=${pip_bin} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} PG_CONFIG=${PG_CONFIG} -- sh -c 'export PG_CONFIG="$PG_CONFIG"; ${pip_bin} install psycopg2==2.9.6'
-  sudo pip_bin=${pip_bin} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} -- sh -c 'ln -fs ${pip_bin} $(dirname ${pip_bin})/pip'
-  popd > /dev/null
-}
-
-function install_python39() {
-  local PYTHON_VERSION=${1:-"3.9.16"}
-  local INSTALL_PREFIX=$2
-  local LD_LIBRARY_PATH=$3
-  local CPPFLAGS=$4
-  local LDFLAGS=$5
-  pushd . > /dev/null
-
-  cd $HOME
-  local PYTHON_TGZ="Python-${PYTHON_VERSION}.tgz"
-  local PYTHON_SRC_DIR="Python-${PYTHON_VERSION}"
-
-  export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/mit/bin:$PATH
-
-  echo "Installing Python ${PYTHON_VERSION}..."
-  sudo PYTHON_VERSION=${PYTHON_VERSION} INSTALL_PREFIX=${INSTALL_PREFIX} \
-    PYTHON_TGZ=${PYTHON_TGZ} PYTHON_SRC_DIR=${PYTHON_SRC_DIR} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-    CPPFLAGS=${CPPFLAGS} LDFLAGS=${LDFLAGS} PATH=${PATH} \
-    -- sh -c 'cd /tmp && mkdir -p "${INSTALL_PREFIX}" && \
-    curl -o "${PYTHON_TGZ}" "https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_TGZ}" && \
-    tar zxf "${PYTHON_TGZ}" && \
-    cd "${PYTHON_SRC_DIR}" && \
-    ./configure --prefix="${INSTALL_PREFIX}" --enable-shared --enable-optimizations --with-lto && \
-    make altinstall'
-
-  # echo "Stripping debug symbols to reduce size..."
-  # sudo -- sh -c '/usr/bin/strip "${INSTALL_PREFIX}/bin/python3.9" && \
-  #   /usr/bin/strip "${INSTALL_PREFIX}/lib/libpython3.9.so.1.0"'
-
-  # Install pip
-  sudo PYTHON_VERSION=${PYTHON_VERSION} INSTALL_PREFIX=${INSTALL_PREFIX} \
-    PYTHON_TGZ=${PYTHON_TGZ} PYTHON_SRC_DIR=${PYTHON_SRC_DIR} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-    CPPFLAGS=${CPPFLAGS} LDFLAGS=${LDFLAGS} PATH=${PATH} \
-    -- sh -c 'cd /tmp && curl -sS https://bootstrap.pypa.io/get-pip.py | "${INSTALL_PREFIX}/bin/python3.9"'
-
-  export PYTHON39_PATH="${INSTALL_PREFIX}"
-  export pip_bin=${PYTHON39_PATH}/bin/pip3.9
-  export VIRTUAL_ENV_VERSION="21.7.16"
+  export VIRTUAL_ENV_VERSION="${HUE_VIRTUAL_ENV_VERSION}"
   # Pip modules install
   sudo pip_bin=${pip_bin} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} -- sh -c '${pip_bin} install virtualenv=='${VIRTUAL_ENV_VERSION}' virtualenv-make-relocatable==0.0.1 mysqlclient==2.1.1'
   sudo pip_bin=${pip_bin} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} PG_CONFIG=${PG_CONFIG} -- sh -c 'export PG_CONFIG="$PG_CONFIG"; ${pip_bin} install psycopg2==2.9.6'
@@ -201,30 +163,19 @@ function install_python39() {
 
 function install_sqlite_python() {
   local DOCKEROS="${1:-ubuntu22}"
-  local PYTHON_VERSION="${2:-3.11.12}"
+  local PYTHON_VERSION="${2:-3.11.18}"
   local INSTALL_PREFIX="/opt/python/${PYTHON_VERSION}"
   local SQLITE3_PATH="/opt/sqlite3"
 
   pushd . > /dev/null
 
-  if [[ "$PYTHON_VERSION" == "$REQ_PYTHON311" ]]; then
-    if [[ -z ${PYTHON311_PATH+x} ]]; then
-      install_build_dependencies "$DOCKEROS"
-      install_sqlite3 "$SQLITE3_PATH"
-      export LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${SQLITE3_PATH}/lib:${LD_LIBRARY_PATH}"
-      export CPPFLAGS="-I${SQLITE3_PATH}/include"
-      export LDFLAGS="-L${SQLITE3_PATH}/lib"
-      install_python311 "$PYTHON_VERSION" "$INSTALL_PREFIX" "$LD_LIBRARY_PATH" "$CPPFLAGS" "$LDFLAGS"
-    fi
-  elif [[ "$PYTHON_VERSION" == "$REQ_PYTHON39" ]]; then
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_build_dependencies "$DOCKEROS"
-      install_sqlite3 "$SQLITE3_PATH"
-      export LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${SQLITE3_PATH}/lib:${LD_LIBRARY_PATH}"
-      export CPPFLAGS="-I${SQLITE3_PATH}/include"
-      export LDFLAGS="-L${SQLITE3_PATH}/lib"
-      install_python39 "$PYTHON_VERSION" "$INSTALL_PREFIX" "$LD_LIBRARY_PATH" "$CPPFLAGS" "$LDFLAGS"
-    fi
+  if [[ -z ${PYTHON311_PATH+x} ]]; then
+    install_build_dependencies "$DOCKEROS"
+    install_sqlite3 "$SQLITE3_PATH"
+    export LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${SQLITE3_PATH}/lib:${LD_LIBRARY_PATH}"
+    export CPPFLAGS="-I${SQLITE3_PATH}/include"
+    export LDFLAGS="-L${SQLITE3_PATH}/lib"
+    install_python311 "$PYTHON_VERSION" "$INSTALL_PREFIX" "$LD_LIBRARY_PATH" "$CPPFLAGS" "$LDFLAGS"
   fi
 
   popd > /dev/null
@@ -266,9 +217,8 @@ function centos7_install() {
     sudo -- sh -c 'cd /tmp && curl -fsSL https://rpm.nodesource.com/setup_16.x | sudo bash - && \
         yum install -y nodejs npm'
 
-    unset PYTHON39_PATH
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
+    if [[ -z ${PYTHON311_PATH+x} ]]; then
+      install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
   fi
 }
@@ -308,9 +258,6 @@ function redhat8_install() {
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
 
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
 
   fi
 }
@@ -342,9 +289,6 @@ function redhat8_arm64_install() {
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
 
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
   fi
 }
 
@@ -382,9 +326,6 @@ function redhat9_install() {
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
 
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
   fi
 }
 
@@ -422,11 +363,6 @@ function redhat9_arm64_install() {
     if [[ -z ${PYTHON311_PATH+x} ]]; then
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
-
-    unset PYTHON39_PATH
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
   fi
 }
 
@@ -462,9 +398,8 @@ function sles12_install() {
     # Node-v20-LTS is not supported by old OS'es - Redhat7_ppc, Centos7, Ubuntu18, Sles12. So upgrading to node-v16
     sudo -- sh -c 'zypper install -y npm14 nodejs14'
 
-    unset PYTHON39_PATH
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
+    if [[ -z ${PYTHON311_PATH+x} ]]; then
+      install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
   fi
 }
@@ -504,9 +439,6 @@ function sles15_install() {
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
 
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
   fi
 }
 
@@ -557,9 +489,6 @@ function ubuntu18_install() {
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
 
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
   fi
 }
 
@@ -606,9 +535,8 @@ function ubuntu20_install() {
       cd /tmp && curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && \
       apt-get install -y nodejs'
 
-    unset PYTHON39_PATH
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
+    if [[ -z ${PYTHON311_PATH+x} ]]; then
+      install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
   fi
 }
@@ -654,9 +582,6 @@ function ubuntu22_install() {
       install_sqlite_python "$os" "$REQ_PYTHON311"
     fi
 
-    if [[ -z ${PYTHON39_PATH+x} ]]; then
-      install_sqlite_python "$os" "$REQ_PYTHON39"
-    fi
   fi
 }
 

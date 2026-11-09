@@ -16,19 +16,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 import logging
 from builtins import object
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from sqlalchemy.dialects import registry
 from sqlalchemy.exc import UnsupportedCompilationError
-from sqlalchemy.types import ARRAY, JSON, VARCHAR, NullType
+from sqlalchemy.types import ARRAY, JSON, NullType, VARCHAR
 
 from desktop.auth.backend import rewrite_user
 from desktop.lib.django_test_util import make_logged_in_client
 from notebook.connectors.base import AuthenticationRequired
-from notebook.connectors.sql_alchemy import Assist, SqlAlchemyApi
+from notebook.connectors.sql_alchemy import _load_dialect, Assist, SqlAlchemyApi
 from useradmin.models import User
 
 LOG = logging.getLogger()
@@ -76,6 +76,25 @@ class TestApi(object):
 
     with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
       SqlAlchemyApi(self.user, interpreter)._create_engine()
+
+    url = create_engine.call_args.args[0]
+    assert 's3_staging_dir=s3%3A%2F%2Fgethue-athena%2Fscratch' in url
+    assert 'work_group=demo_group' in url
+    assert 'catalog_name=AwsDataCatalog' in url
+
+  def test_create_athena_engine_without_work_group_and_catalog_name(self):
+    interpreter = {
+      'name': 'hive',
+      'options': {
+        'url': 'awsathena+rest://XXXXXXXXXXXXXXX:XXXXXXXXXXXXXXXXXXX@athena.us-west-2.amazonaws.com:443/default?'
+            's3_staging_dir=s3://gethue-athena/scratch'
+      }
+    }
+
+    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+      SqlAlchemyApi(self.user, interpreter)._create_engine()
+
+    assert 's3_staging_dir=s3%3A%2F%2Fgethue-athena%2Fscratch' in create_engine.call_args.args[0]
 
   def test_fetch_result_empty(self):
     notebook = Mock()
@@ -141,7 +160,7 @@ class TestApi(object):
       }
     }
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
       with pytest.raises(AuthenticationRequired):
         SqlAlchemyApi(self.user, interpreter)._create_engine()
 
@@ -165,7 +184,7 @@ class TestApi(object):
       }
     }
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
       SqlAlchemyApi(self.user, interpreter)._create_engine()
 
   def test_create_connection_error(self):
@@ -176,7 +195,7 @@ class TestApi(object):
       }
     }
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
       with pytest.raises(AuthenticationRequired):
         engine = SqlAlchemyApi(self.user, interpreter)._create_engine()
         SqlAlchemyApi(self.user, interpreter)._create_connection(engine)
@@ -201,7 +220,7 @@ class TestApi(object):
       }
     }
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
       engine = SqlAlchemyApi(self.user, interpreter)._create_engine()
       SqlAlchemyApi(self.user, interpreter)._create_connection(engine)
 
@@ -216,14 +235,14 @@ class TestApi(object):
     }
 
     with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      engine = SqlAlchemyApi(self.user, interpreter)._create_engine()
+      SqlAlchemyApi(self.user, interpreter)._create_engine()
 
       create_engine.assert_called_with('presto://hue:8080/hue', pool_pre_ping=True)
 
     interpreter['options']['has_impersonation'] = True  # On
 
     with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      engine = SqlAlchemyApi(self.user, interpreter)._create_engine()
+      SqlAlchemyApi(self.user, interpreter)._create_engine()
 
       create_engine.assert_called_with('presto://hue:8080/hue',
                                        connect_args={'principal_username': 'test'},
@@ -240,14 +259,14 @@ class TestApi(object):
     }
 
     with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      engine = SqlAlchemyApi(self.user, interpreter)._create_engine()
+      SqlAlchemyApi(self.user, interpreter)._create_engine()
 
       create_engine.assert_called_with('phoenix://hue:8080/hue', pool_pre_ping=False)
 
     interpreter['options']['has_impersonation'] = True  # On
 
     with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      engine = SqlAlchemyApi(self.user, interpreter)._create_engine()
+      SqlAlchemyApi(self.user, interpreter)._create_engine()
 
       create_engine.assert_called_with('phoenix://test@hue:8080/hue', pool_pre_ping=False)
 
@@ -275,7 +294,7 @@ class TestApi(object):
   def test_check_status(self):
     notebook = Mock()
 
-    with patch('notebook.connectors.sql_alchemy.CONNECTIONS') as CONNECTIONS:
+    with patch('notebook.connectors.sql_alchemy.CONNECTIONS'):
 
       snippet = {'result': {'handle': {'guid': 'guid-1', 'has_result_set': False}}}
       response = SqlAlchemyApi(self.user, self.interpreter).check_status(notebook, snippet)
@@ -288,9 +307,9 @@ class TestApi(object):
   def test_get_sample_data(self):
     snippet = Mock()
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
       with patch('notebook.connectors.sql_alchemy.Assist.get_sample_data') as get_sample_data:
-        with patch('notebook.connectors.sql_alchemy.inspect') as inspect:
+        with patch('notebook.connectors.sql_alchemy.inspect'):
           get_sample_data.return_value = (['col1'], [[1], [2]])
 
           response = SqlAlchemyApi(self.user, self.interpreter).get_sample_data(snippet)
@@ -303,8 +322,8 @@ class TestApi(object):
   def test_get_tables(self):
     snippet = MagicMock()
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      with patch('notebook.connectors.sql_alchemy.inspect') as inspect:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
+      with patch('notebook.connectors.sql_alchemy.inspect'):
         with patch('notebook.connectors.sql_alchemy.Assist.get_table_names') as get_table_names:
           with patch('notebook.connectors.sql_alchemy.Assist.get_view_names') as get_view_names:
             get_table_names.return_value = ['table1']
@@ -319,9 +338,9 @@ class TestApi(object):
   def test_get_sample_data_table(self):
     snippet = Mock()
 
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
       with patch('notebook.connectors.sql_alchemy.Assist.get_sample_data') as get_sample_data:
-        with patch('notebook.connectors.sql_alchemy.inspect') as inspect:
+        with patch('notebook.connectors.sql_alchemy.inspect'):
           get_sample_data.return_value = (['col1'], [[1], [2]])
 
           response = SqlAlchemyApi(self.user, self.interpreter).get_sample_data(snippet, database='database1', table='table1')
@@ -349,7 +368,7 @@ class TestApi(object):
           snippet = {'statement': 'SELECT 1;', 'result': {}}
 
           # Trim
-          engine = SqlAlchemyApi(self.user, interpreter).execute(notebook, snippet)
+          SqlAlchemyApi(self.user, interpreter).execute(notebook, snippet)
 
           execute.assert_called_with('SELECT 1')
 
@@ -357,7 +376,7 @@ class TestApi(object):
           interpreter['options']['url'] = 'mysql://hue:3306/hue'
           interpreter['dialect_properties']['sql_identifier_quote'] = '`'
 
-          engine = SqlAlchemyApi(self.user, interpreter).execute(notebook, snippet)
+          SqlAlchemyApi(self.user, interpreter).execute(notebook, snippet)
 
           execute.assert_called_with('SELECT 1')
 
@@ -423,8 +442,8 @@ class TestAutocomplete(object):
     }
 
     snippet = MagicMock()
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      with patch('notebook.connectors.sql_alchemy.inspect') as inspect:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
+      with patch('notebook.connectors.sql_alchemy.inspect'):
         with patch('notebook.connectors.sql_alchemy.Assist') as Assist:
           Assist.return_value = Mock(get_databases=Mock(return_value=['SYSTEM', None]))
 
@@ -439,8 +458,8 @@ class TestAutocomplete(object):
     }
 
     snippet = MagicMock()
-    with patch('notebook.connectors.sql_alchemy.create_engine') as create_engine:
-      with patch('notebook.connectors.sql_alchemy.inspect') as inspect:
+    with patch('notebook.connectors.sql_alchemy.create_engine'):
+      with patch('notebook.connectors.sql_alchemy.inspect'):
         with patch('notebook.connectors.sql_alchemy.Assist') as Assist:
           def col1_dict(key):
             return {
@@ -525,3 +544,29 @@ class TestUtils():
 
     assert api._fix_bigquery_db_prefixes('table') == 'table'
     assert api._fix_bigquery_db_prefixes('db.table') == 'table'
+
+
+class TestLoadDialect(object):
+
+  def test_registry_uses_load_dialect(self):
+    assert registry.auto_fn is _load_dialect
+
+  def test_builtin_dialect_before_entry_points(self):
+    with patch('notebook.connectors.sql_alchemy.entry_points') as entry_points:
+      loader = _load_dialect('sqlite')
+
+    assert loader().name == 'sqlite'
+    entry_points.assert_not_called()
+
+  def test_entry_point_dialect(self):
+    entry_point = Mock()
+
+    with patch('notebook.connectors.sql_alchemy.entry_points', return_value=[entry_point]) as entry_points:
+      loader = _load_dialect('trino')
+
+    entry_points.assert_called_once_with(group='sqlalchemy.dialects', name='trino')
+    assert loader is entry_point.load
+
+  def test_unknown_dialect(self):
+    with patch('notebook.connectors.sql_alchemy.entry_points', return_value=[]):
+      assert _load_dialect('nosuchdialect') is None

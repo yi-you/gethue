@@ -21,6 +21,11 @@ COMPILEHUE_VERSION=huecompile_ubi:$DOCKERHUEBASE_VERSION
 HUEBASE_VERSION=huebase_ubi:$DOCKERHUEBASE_VERSION
 HUELBBASE_VERSION=huelb_httpd_ubi:$DOCKERHUELB_VERSION
 
+# Build images without layer caching and with fresh base images so they always pick up the latest system CA
+# certificates and security updates (eMudhra CA incident). Override with e.g. DOCKER_BUILD_OPTS="" for a quick
+# local rebuild.
+DOCKER_BUILD_OPTS="${DOCKER_BUILD_OPTS---no-cache --pull}"
+
 CONTAINER_HUE_SRC=/root/${HUEUSER}
 CONTAINER_HUE_OPT=/opt
 
@@ -63,14 +68,11 @@ docker_hue_build() {
   cp -a $BUILD_DIR/${HUEUSER} $HUE_DIR
   rm -f $HUE_DIR/${HUEUSER}/desktop/conf/*
 
-  # Include tools/scripts for multi-python wrapper and helpers
+  # Include tools/scripts for Hue CLI wrappers and helpers
   mkdir -p $HUE_DIR/${HUEUSER}/tools/scripts
   cp -a $HUE_SRC/tools/scripts/* $HUE_DIR/${HUEUSER}/tools/scripts/
   chmod +x $HUE_DIR/${HUEUSER}/tools/scripts/*.sh 2>/dev/null || true
   chmod +x $HUE_DIR/${HUEUSER}/tools/scripts/python/*.sh 2>/dev/null || true
-
-  # Remove chardet package
-  rm -rf $HUE_DIR/${HUEUSER}/tools/virtual-bootstrap/virtualenv_support
 
   # Reduce Hue container size
   rm -rf $HUE_DIR/${HUEUSER}/node_modules
@@ -81,7 +83,7 @@ docker_hue_build() {
   done
 
   sed -i -e "s#\${HUEBASE_VERSION}#${HUEBASE_VERSION}#g" $HUE_DIR/Dockerfile
-  docker build -f $HUE_DIR/Dockerfile -t ${REGISTRY}/hue:$GBN \
+  docker build ${DOCKER_BUILD_OPTS} -f $HUE_DIR/Dockerfile -t ${REGISTRY}/hue:$GBN \
     --build-arg GBN=$GBN \
     --build-arg GSHA="$GSHA" \
     --build-arg GBRANCH=$GBRANCH \
@@ -105,7 +107,7 @@ docker_huelb_build() {
   done
 
   sed -i -e "s#\${HUELBBASE_VERSION}#${HUELBBASE_VERSION}#g" $APACHE_DIR/Dockerfile
-  docker build -f $APACHE_DIR/Dockerfile -t ${REGISTRY}/huelb:$GBN \
+  docker build ${DOCKER_BUILD_OPTS} -f $APACHE_DIR/Dockerfile -t ${REGISTRY}/huelb:$GBN \
     --build-arg GBN=$GBN \
     --build-arg GSHA="$GSHA" \
     --build-arg GBRANCH=$GBRANCH \
@@ -117,7 +119,7 @@ docker_huelb_build() {
 
 build_huebase() {
   cd $BASEHUE_DIR
-  docker build -f $BASEHUE_DIR/Dockerfile -t ${REGISTRY}/$HUEBASE_VERSION .
+  docker build ${DOCKER_BUILD_OPTS} -f $BASEHUE_DIR/Dockerfile -t ${REGISTRY}/$HUEBASE_VERSION .
   docker tag ${REGISTRY}/$HUEBASE_VERSION $HUEBASE_VERSION
   docker push ${REGISTRY}/$HUEBASE_VERSION
   docker pull ${REGISTRY}/$HUEBASE_VERSION
@@ -125,7 +127,7 @@ build_huebase() {
 
 build_huelbbase() {
   cd $BASEHUELB_DIR
-  docker build -f $BASEHUELB_DIR/Dockerfile -t ${REGISTRY}/$HUELBBASE_VERSION .
+  docker build ${DOCKER_BUILD_OPTS} -f $BASEHUELB_DIR/Dockerfile -t ${REGISTRY}/$HUELBBASE_VERSION .
   docker tag ${REGISTRY}/$HUELBBASE_VERSION $HUELBBASE_VERSION
   docker push ${REGISTRY}/$HUELBBASE_VERSION
   docker pull ${REGISTRY}/$HUELBBASE_VERSION
@@ -133,7 +135,7 @@ build_huelbbase() {
 
 build_huecompilebase() {
   cd $COMPILEHUE_DIR
-  docker build -f $COMPILEHUE_DIR/Dockerfile -t ${REGISTRY}/$COMPILEHUE_VERSION .
+  docker build ${DOCKER_BUILD_OPTS} -f $COMPILEHUE_DIR/Dockerfile -t ${REGISTRY}/$COMPILEHUE_VERSION .
   docker tag ${REGISTRY}/$COMPILEHUE_VERSION $COMPILEHUE_VERSION
   docker push ${REGISTRY}/$COMPILEHUE_VERSION
   docker pull ${REGISTRY}/$COMPILEHUE_VERSION

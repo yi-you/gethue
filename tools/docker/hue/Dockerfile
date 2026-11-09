@@ -22,6 +22,7 @@ RUN apt-get update -y && apt-get install -y \
   libldap2-dev \
   libsnappy-dev \
   libffi-dev \
+  libmagic1 \
   pkg-config \
   rsync \
   curl \
@@ -31,7 +32,9 @@ RUN apt-get update -y && apt-get install -y \
 
 ADD . /hue
 
-RUN pip3 install --upgrade --no-cache-dir setuptools virtualenv pip && \
+# pip 26.2.2 and virtualenv 21.14.13: older releases keep trusting the compromised eMudhra CAs.
+# Keep in sync with desktop/core/pip-bootstrap-requirements.txt and VIRTUAL_ENV_VERSION in Makefile.vars.
+RUN pip3 install --upgrade --no-cache-dir setuptools virtualenv==21.14.13 pip==26.2.2 && \
   apt-get install -y curl && \
   curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
   apt-get install -y nodejs && \
@@ -55,9 +58,9 @@ RUN pip3 install --upgrade --no-cache-dir setuptools virtualenv pip && \
   npm cache clean --force && \
   pip cache purge && \
   rm -rf /var/lib/apt/lists/* && \
-  cp -r /hue/tools/docker/hue/conf3/* /usr/share/hue/desktop/conf/ && \
+  cp -r /hue/tools/docker/hue/conf/* /usr/share/hue/desktop/conf/ && \
   cp /hue/tools/docker/hue/startup.sh /usr/share/hue/startup.sh && \
-  # Include tools/scripts for multi-python wrapper and helpers
+  # Include tools/scripts for Hue CLI wrappers and helpers
   mkdir -p /usr/share/hue/tools/scripts && \
   cp -r /hue/tools/scripts/* /usr/share/hue/tools/scripts/ && \
   chmod +x /usr/share/hue/tools/scripts/*.sh || true && \
@@ -70,6 +73,10 @@ RUN pip3 install --upgrade --no-cache-dir setuptools virtualenv pip && \
 WORKDIR /usr/share/hue
 
 # Install DB connectors
+# The setup.py of ksql-python imports pip, which is not available in an isolated build environment.
+RUN ./build/env/bin/pip install --no-cache-dir --no-build-isolation \
+  git+https://github.com/bryanyang0528/ksql-python
+
 # To move to requirements_connectors.txt
 RUN ./build/env/bin/pip install --no-cache-dir \
   psycopg2-binary \
@@ -78,8 +85,6 @@ RUN ./build/env/bin/pip install --no-cache-dir \
   flower==2.0.1 \
   # Contains fix for SparkSql show tables \
   git+https://github.com/gethue/PyHive \
-  #ksql \
-  git+https://github.com/bryanyang0528/ksql-python \
   pydruid \
   # pybigquery \
   elasticsearch-dbapi \
